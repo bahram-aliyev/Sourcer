@@ -25,34 +25,43 @@ module Aggregate =
             load >> AsyncResult.mapError (
                 fun (LoadException ex) -> PersistenceException ex)
 
-        let ensureVersion av en =
-            let crnt = en |> (List.length >> AggregateVersion)
-            match av = crnt with
-            | true -> Ok en
-            | _ ->
-                (AggregateVersion.value av, AggregateVersion.value crnt)
-                ||> sprintf "Concurrency error, actual aggregate version '%i' does not match expected '%i'."
-                |> (ConcurrencyError >> Error)
+        let execCmd { AggregateId = aid; AggregateVersion = av; AggregateAction = act } en =
 
-        let execAct act (state, av) =
-            let rec versionize (ven : VersionedEvent<_> list) v en =
+            let ensureVersion av en =
+                let crnt = en |> (List.length >> AggregateVersion)
+                match av = crnt with
+                | true -> Ok en
+                | _ ->
+                    (AggregateVersion.value av, AggregateVersion.value crnt)
+                    ||> sprintf "Concurrency error, actual aggregate version '%i' does not match expected '%i'."
+                    |> (ConcurrencyError >> Error)
+
+            let applyAction act (state, av) =
+                let rec versionize (ven : VersionedEvent<_> list) v en =
+                    match en with
+                    | h::t -> 
+                        let v = AggregateVersion.inc v 
+                        versionize ((h, v) :: ven) v t
+                    | [] -> List.rev ven
+
+                (state, act)
+                ||> exec 
+                |> Result.mapError ValidationError
+                |> Result.map (versionize [] av)
+
+            let esureEvents aid en =
                 match en with
-                | h::t -> 
-                    let v = AggregateVersion.inc v 
-                    versionize ((h, v) :: ven) v t
-                | [] -> List.rev ven
+                | [] ->
+                    sprintf "Command produced no events of type '%s' for aggregateId:%s." typeof<'event>.Name (aid.ToString())
+                    |> (VoidStateChangeError >> Error)
+                | _ -> Result.Ok en
 
-            (state, act)
-            ||> exec 
-            |> Result.mapError ValidationError
-            |> Result.map (versionize [] av)
-
-        let esureEvents aid en =
-            match en with
-            | [] ->
-                sprintf "Command produced no events of type '%s' for aggregateId:%s." typeof<'event>.Name (aid.ToString())
-                |> (VoidStateChangeError >> Error)
-            | _ -> Result.Ok en
+            (av, en)
+            ||> ensureVersion 
+            |> Result.map (restoreState apply (zero, AggregateVersion.zero))
+            |> Result.bind (applyAction act)
+            |> Result.bind (esureEvents aid)
+            |> AsyncResult.ofResult
 
         let commitEvents aid (ven : VersionedEvent<_> list) =
             (aid, ven)
@@ -61,13 +70,6 @@ module Aggregate =
                 | DuplicateVersionError e -> AggregateCommandFailure.ConcurrencyError e
                 | PersisitenceException ex -> AggregateCommandFailure.PersistenceException ex)
 
-        let execCmd { AggregateId = aid; AggregateVersion = av; AggregateAction = act } en =
-            (av, en)
-            ||> ensureVersion 
-            |> Result.map (restoreState apply (zero, AggregateVersion.zero))
-            |> Result.bind (execAct act)
-            |> Result.bind (esureEvents aid)
-            |> AsyncResult.ofResult
 
         cmd.AggregateId
         |> loadEvents
