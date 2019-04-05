@@ -6,6 +6,9 @@ module Aggregate =
     open Sourcer.FSharp.Extras
 
 
+    type private VersionedEvent<'event> =  'event * AggregateVersion
+
+
     let restoreState 
         (apply : 'state -> 'event -> 'state) 
         (state : 'state * AggregateVersion)
@@ -32,7 +35,7 @@ module Aggregate =
                 |> (ConcurrencyError >> Error)
 
         let execAct act (state, av) =
-            let rec versionize ven v en =
+            let rec versionize (ven : VersionedEvent<_> list) v en =
                 match en with
                 | h::t -> 
                     let v = AggregateVersion.inc v 
@@ -44,15 +47,15 @@ module Aggregate =
             |> Result.mapError ValidationError
             |> Result.map (versionize [] av)
 
-        let esureEvents id en =
+        let esureEvents aid en =
             match en with
             | [] ->
-                sprintf "Command produced no events of type '%s' for aggregateId:%s." typeof<'event>.Name (id.ToString())
+                sprintf "Command produced no events of type '%s' for aggregateId:%s." typeof<'event>.Name (aid.ToString())
                 |> (VoidStateChangeError >> Error)
             | _ -> Result.Ok en
 
-        let commit id events =
-            (id, events)
+        let commitEvents aid (ven : VersionedEvent<_> list) =
+            (aid, ven)
             |> commit 
             |> AsyncResult.mapError (function
                 | DuplicateVersionError e -> AggregateCommandFailure.ConcurrencyError e
@@ -69,7 +72,7 @@ module Aggregate =
         cmd.AggregateId
         |> loadEvents
         |> AsyncResult.bind (execCmd cmd)
-        |> AsyncResult.bind (commit cmd.AggregateId)
+        |> AsyncResult.bind (commitEvents cmd.AggregateId)
 
 
     let loadState
@@ -101,4 +104,3 @@ module Aggregate =
         |> Async.map (
             Result.bind verifyStream 
             >> Result.map restoreState)
-        
