@@ -27,7 +27,7 @@ module private FSharp =
         [<RequireQualifiedAccess>]
         module AsyncResult =
 
-            let ofAsync xA : AsyncResult<_,_> = 
+            let ofAsync xA : AsyncResult<_,_> =
                 xA |> Async.map Result.Ok
 
             let tee (f : _ -> unit) xAr = 
@@ -37,7 +37,7 @@ module private FSharp =
 
         [<Extension>]
         type AsyncResult() =
-    
+
             [<Extension>]
             static member inline awaitTask (xT : Task) =
                 xT |> (Async.AwaitTask >> AsyncResult.ofAsync >> AsyncResult.catch id)
@@ -124,32 +124,82 @@ module ClientSession =
     let create
         (db : IMongoDatabase) 
         : AsyncResult<ClientSession, exn> =
-
-        let composeCf = CollectionFactory.compose
-
         db.Client
         |> Transaction.create
-        |> AsyncResult.map (fun tr -> ClientSession(tr, cf = composeCf db))
+        |> AsyncResult.map (fun tr -> ClientSession(tr, cf = CollectionFactory.compose db))
+
+
+[<RequireQualifiedAccess>]
+module EventStream =
+
+
+    let internal load<'aid, 'event>
+        (cf : CollectionFactory)
+        (des : DeserializeEventFromDocument<'event>)
+        (id : 'aid, av : AggregateVersion option)
+        : AsyncResult<'event list, LoadEventsFailure> =
+
+        let fetchEvents id =
+            let filter =
+                let eqaid = 
+                    FilterDefinitionBuilder<EventDocument>()
+                            .Eq((fun x -> x.AggregateId), (id.ToString()))
+                match av with
+                | Some av -> 
+                    let lteav = 
+                        FilterDefinitionBuilder<EventDocument>()
+                            .Lte((fun x -> x.AggregateVersion), AggregateVersion.value av)
+                    FilterDefinitionBuilder<EventDocument>().And([| eqaid; lteav |])
+                | _ -> eqaid
+                    
+            let findOpt = 
+                let sort =
+                    SortDefinitionBuilder<EventDocument>()
+                        .Ascending(FieldDefinition<EventDocument>.op_Implicit("AggregateVersion"))            
+                FindOptions<EventDocument>(Sort = sort)
+
+            let readFromCursor (c : IAsyncCursor<_>) = 
+                c.ToListAsync() |> AsyncResult.awaitTask
+         
+            let cl = cf typeof<'event>
+            cl.FindAsync(filter, findOpt)
+            |> (AsyncResult.awaitTask >> AsyncResult.bind readFromCursor)
+
+        let desEvents = Seq.map des >> List.ofSeq
+    
+        id
+        |> fetchEvents
+        |> AsyncResult.mapError LoadEventsFailure.LoadException
+        |> AsyncResult.map desEvents
+
+
+    let compose<'aid, 'event when 'aid : equality>
+        (des : DeserializeEventFromDocument<'event>)
+        (cf : CollectionFactory)
+        : EventStream<'aid, 'event> =
+        EventStream <| load cf des
 
 
 [<RequireQualifiedAccess>]
 module EventStore =
 
 
-    let private commitTrn<'aid, 'event when 'aid : equality>
+    let private runTrn<'aid, 'event when 'aid : equality>
         (Transaction(start, commit, rollback)) 
         (commitEvn : ('aid * ('event * AggregateVersion) list) -> AsyncResult<unit, CommitEventsFailure>) =
 
         fun (aid, aven) ->
+
+            let startTrn = 
+                (start >> AsyncResult.ofResult >> AsyncResult.mapError PersisitenceException)
             
-            let startTrn = (start >> AsyncResult.ofResult >> AsyncResult.mapError PersisitenceException)                
-            
-            let commitTrn = (commit >> AsyncResult.mapError PersisitenceException)
-            
-            let rollbackTrn cmtEr =                
-                let aggregateEx (cmtFlr : CommitEventsFailure) (rlbEx : exn) =                         
+            let commitTrn =
+                (commit >> AsyncResult.mapError PersisitenceException)
+
+            let rollbackTrn cmtEr =
+                let aggregateEx (cmtFlr : CommitEventsFailure) (rlbEx : exn) =
                     let erMsg = sprintf "Failed to rollback failed transaction for events of type `%s` for aggregateId:%O"
-                                        typeof<'event>.Name id                        
+                                        typeof<'event>.Name id
                     match cmtFlr with
                     | PersisitenceException perEx -> 
                         new AggregateException(
@@ -163,7 +213,7 @@ module EventStore =
                         :> Exception
                     |> PersisitenceException
                 rollback () |> AsyncResult.mapError (aggregateEx cmtEr)
-
+            
             let commitEvn () = (aid, aven) |> commitEvn
             
             let f =
@@ -173,11 +223,10 @@ module EventStore =
                 >> Async.bind (function 
                     | Ok _ -> AsyncResult.retn ()
                     | Error er -> rollbackTrn er)
-
             f ()
 
 
-    let commit<'aid, 'event when 'aid : equality>
+    let private commit<'aid, 'event when 'aid : equality>
         (cs : ClientSession)
         (ser : SerializeEventToDocument<'aid, 'event>)
         (aven : 'aid * ('event * AggregateVersion) list)
@@ -210,50 +259,16 @@ module EventStore =
             >> insertDocuments 
             >> handleError
         
-        let f = commitTrn trn commit
-        
+        let f = runTrn trn commit
         f aven
 
-
-    let load<'aid, 'event>
-        (cf : CollectionFactory)
-        (des : DeserializeEventFromDocument<'event>) 
-        (id : 'aid)
-        : AsyncResult<'event list, LoadEventsFailure> =
-
-        let fetchEvents id =
-            let filter =
-                FilterDefinitionBuilder<EventDocument>()
-                    .Eq((fun x -> x.AggregateId), (id.ToString()))                        
-            let findOpt = 
-                let sort =
-                    SortDefinitionBuilder<EventDocument>()
-                        .Ascending(FieldDefinition<EventDocument>.op_Implicit("AggregateVersion"))            
-                FindOptions<EventDocument>(Sort = sort)            
-            let cl = cf typeof<'event>
-
-            let readFromCursor (c : IAsyncCursor<_>) = 
-                c.ToListAsync() |> AsyncResult.awaitTask
-             
-            cl.FindAsync(filter, findOpt)
-            |> (AsyncResult.awaitTask >> AsyncResult.bind readFromCursor)
-
-        let desEvents = Seq.map des >> List.ofSeq
+    let compose<'aid, 'event when 'aid : equality> 
+        (ser : SerializeEventToDocument<'aid, 'event>, des : DeserializeEventFromDocument<'event>)
+        (cs : ClientSession) =        
         
-        id
-        |> fetchEvents
-        |> AsyncResult.mapError LoadEventsFailure.LoadException
-        |> AsyncResult.map desEvents
-
-
-[<RequireQualifiedAccess>]
-module EventStream =
-
-
-    let compose<'aid, 'event when 'aid : equality>
-        (des : DeserializeEventFromDocument<'event>)
-        (cf : CollectionFactory)
-        : EventStream<'aid, 'event> =
-
-        let load = EventStore.load cf des
-        EventStream load
+        let commit = commit cs ser
+        let load aid =
+            let (ClientSession (_, cf)) = cs
+            EventStream.load cf des (aid, None)
+        
+        (commit, load) |> EventStore.EventStore
