@@ -5,9 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="FSharp.Extras.fs" />
-    <Compile Include="Types.fs" />
-    <Compile Include="Aggregate.fs" />
+    <Compile Include="EventSourcing.fs" />
   </ItemGroup>
 
   <ItemGroup />

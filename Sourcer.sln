@@ -3,7 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 16
 VisualStudioVersion = 16.0.28729.10
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "EventSourcing", "src\EventSourcing\EventSourcing.fsproj", "{101F88A6-907C-4CDF-B870-02428250EC36}"
+Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "EventSourcing", "src\EventSourcing\EventSourcing.fsproj", "{101F88A6-907C-4CDF-B870-02428250EC36}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "MongoDB.EventStore", "src\MongoDB.EventStore\MongoDB.EventStore.fsproj", "{DE6BD1A3-101A-467C-8988-BAA896CFA1EE}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -15,6 +17,10 @@ Global
 		{101F88A6-907C-4CDF-B870-02428250EC36}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{101F88A6-907C-4CDF-B870-02428250EC36}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{101F88A6-907C-4CDF-B870-02428250EC36}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DE6BD1A3-101A-467C-8988-BAA896CFA1EE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DE6BD1A3-101A-467C-8988-BAA896CFA1EE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DE6BD1A3-101A-467C-8988-BAA896CFA1EE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DE6BD1A3-101A-467C-8988-BAA896CFA1EE}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

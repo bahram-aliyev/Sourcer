@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>Sourcer.MongoDB</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="EventStore.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MongoDB.Driver" Version="2.8.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\EventSourcing\EventSourcing.fsproj" />
+  </ItemGroup>
+
+</Project>
